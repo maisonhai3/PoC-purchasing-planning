@@ -1,0 +1,21 @@
+{
+  "name": "spending-priority-functions",
+  "description": "Firebase Functions for spending-priority app",
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^6.3.2"
+  },
+  "devDependencies": {
+    "eslint": "^8.15.0",
+    "eslint-config-google": "^0.14.0"
+  },
+  "private": true
+}
