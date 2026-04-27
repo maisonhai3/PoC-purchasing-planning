@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   ScatterChart, Scatter, XAxis, YAxis,
   ReferenceArea, ReferenceLine, Tooltip,
   ResponsiveContainer
 } from "recharts";
+import { auth } from "./firebase";
+import AuthGate from "./components/AuthGate";
 
 const SAMPLE = `iPhone 16 Pro Max
 Học phí khóa lập trình online
@@ -94,12 +97,20 @@ function ScoreBar({ score, max }) {
 }
 
 export default function App() {
+  const [user, setUser] = useState(undefined); // undefined = loading, null = signed out
   const [step, setStep] = useState("input");
   const [inputText, setInputText] = useState(SAMPLE);
   const [items, setItems] = useState([]);
   const [error, setError] = useState(null);
   const [view, setView] = useState("queue");
   const [loadingMsg, setLoadingMsg] = useState("AI đang đọc danh sách...");
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, setUser);
+  }, []);
+
+  if (user === undefined) return null; // brief auth-loading flash
+  if (!user) return <AuthGate />;
 
   async function analyze() {
     // Phase 3 will replace this stub with a Firebase Function call
@@ -113,6 +124,15 @@ export default function App() {
         .analyze-btn:hover { background: #333 !important; }
         .analyze-btn:active { transform: scale(0.98); }
       `}</style>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+        <button
+          onClick={() => signOut(auth)}
+          style={{ fontSize: 12, color: "#aaa", background: "none", border: "none", cursor: "pointer" }}
+        >
+          Đăng xuất ({user.displayName || user.email})
+        </button>
+      </div>
 
       <div style={{ marginBottom: "1.75rem" }}>
         <div style={{ fontSize: 11, letterSpacing: "0.14em", color: "#aaa", textTransform: "uppercase", marginBottom: 10 }}>
@@ -220,6 +240,12 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button
+            onClick={() => signOut(auth)}
+            style={{ fontSize: 12, color: "#aaa", background: "none", border: "none", cursor: "pointer", marginRight: 4 }}
+          >
+            Đăng xuất
+          </button>
           {[["queue", "Hàng đợi"], ["visual", "Tối giản"], ["matrix", "Ma trận"]].map(([v, label]) => (
             <button
               key={v}
