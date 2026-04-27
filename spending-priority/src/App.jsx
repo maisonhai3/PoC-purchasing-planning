@@ -113,8 +113,59 @@ export default function App() {
   if (!user) return <AuthGate />;
 
   async function analyze() {
-    // Phase 3 will replace this stub with a Firebase Function call
-    console.log("analyze() called — Firebase Function not wired yet");
+    const lines = inputText.split("\n").map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+    setStep("loading");
+    setError(null);
+
+    const msgs = [
+      "AI đang đọc danh sách...",
+      "Đang cân nhắc độ quan trọng...",
+      "Đang đánh giá mức độ khẩn cấp...",
+      "Đang xếp hạng ưu tiên...",
+    ];
+    let mi = 0;
+    const iv = setInterval(() => {
+      mi = (mi + 1) % msgs.length;
+      setLoadingMsg(msgs[mi]);
+    }, 900);
+
+    const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
+    const FUNCTION_URL = import.meta.env.DEV
+      ? `http://localhost:5001/${projectId}/asia-southeast1/analyze`
+      : `https://asia-southeast1-${projectId}.cloudfunctions.net/analyze`;
+
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const res = await fetch(FUNCTION_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ lines }),
+      });
+      clearInterval(iv);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      const scored = data.items
+        .map(item => ({
+          ...item,
+          score: item.importance * item.urgency,
+          quadrant: quadrantOf(item.importance, item.urgency),
+          x: item.urgency,
+          y: item.importance,
+        }))
+        .sort((a, b) => b.score - a.score);
+
+      setItems(scored);
+      setStep("results");
+    } catch (e) {
+      clearInterval(iv);
+      setError("Có lỗi: " + e.message);
+      setStep("input");
+    }
   }
 
   if (step === "input") return (
