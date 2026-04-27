@@ -5,7 +5,8 @@ import {
   ReferenceArea, ReferenceLine, Tooltip,
   ResponsiveContainer
 } from "recharts";
-import { auth } from "./firebase";
+import { logEvent } from "firebase/analytics";
+import { auth, analytics } from "./firebase";
 import AuthGate from "./components/AuthGate";
 
 const SAMPLE = `iPhone 16 Pro Max
@@ -161,10 +162,19 @@ export default function App() {
 
       setItems(scored);
       setStep("results");
+
+      logEvent(analytics, "analyze_submitted", { item_count: lines.length });
+
+      const quadrantCounts = scored.reduce((acc, item) => {
+        acc[item.quadrant] = (acc[item.quadrant] || 0) + 1;
+        return acc;
+      }, {});
+      logEvent(analytics, "quadrant_distribution", quadrantCounts);
     } catch (e) {
       clearInterval(iv);
       setError("Có lỗi: " + e.message);
       setStep("input");
+      logEvent(analytics, "error_occurred", { error_type: "analyze_failed" });
     }
   }
 
@@ -301,7 +311,7 @@ export default function App() {
             <button
               key={v}
               className="view-btn"
-              onClick={() => setView(v)}
+              onClick={() => { setView(v); logEvent(analytics, "results_viewed", { view: v }); }}
               style={{
                 padding: "7px 14px", fontSize: 13, fontWeight: 600,
                 borderRadius: 8, cursor: "pointer",
