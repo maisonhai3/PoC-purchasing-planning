@@ -1,0 +1,16 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // All collections are only accessible via the Firebase Function
+    // (Admin SDK bypasses these rules). Direct client access is denied.
+    match /rate_limits/{uid} {
+      allow read, write: if false;
+    }
+    match /audit_logs/{doc} {
+      allow read, write: if false;
+    }
+    match /cache/{hash} {
+      allow read, write: if false;
+    }
+  }
+}
