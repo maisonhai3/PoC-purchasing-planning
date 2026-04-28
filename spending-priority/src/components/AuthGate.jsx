@@ -4,6 +4,9 @@ import { auth, googleProvider } from "../firebase";
 export default function AuthGate() {
   return (
     <div style={{ textAlign: "center", padding: "3rem 1rem", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+      <style>{`
+        .signin-btn:hover { background: #333 !important; }
+      `}</style>
       <div style={{ fontSize: 11, letterSpacing: "0.14em", color: "#aaa", textTransform: "uppercase", marginBottom: 10 }}>
         AI · Ma trận Eisenhower · Chi tiêu
       </div>
@@ -14,6 +17,7 @@ export default function AuthGate() {
         Đăng nhập để dùng công cụ phân tích chi tiêu AI.
       </p>
       <button
+        className="signin-btn"
         onClick={() => signInWithPopup(auth, googleProvider)}
         style={{
           padding: "12px 28px", fontSize: 15, fontWeight: 700,
@@ -21,8 +25,6 @@ export default function AuthGate() {
           border: "none", borderRadius: 10, cursor: "pointer",
           transition: "background 0.2s",
         }}
-        onMouseOver={e => (e.currentTarget.style.background = "#333")}
-        onMouseOut={e => (e.currentTarget.style.background = "#1a1a1a")}
       >
         Đăng nhập với Google →
       </button>
