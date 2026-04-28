@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
@@ -48,7 +51,7 @@ jobs:
         run: npm ci
       - name: Deploy Firebase Functions
         working-directory: spending-priority
-        run: npx firebase-tools@latest deploy --only functions --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive
+        run: npx firebase-tools@^15 deploy --only functions --project spending-priority --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive
 
   deploy-hosting:
     needs: detect-changes
@@ -77,7 +80,7 @@ jobs:
         run: npm run build
       - name: Deploy Firebase Hosting
         working-directory: spending-priority
-        run: npx firebase-tools@latest deploy --only hosting --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive
+        run: npx firebase-tools@^15 deploy --only hosting --project spending-priority --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive
 
   deploy-firestore:
     needs: detect-changes
@@ -85,6 +88,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - name: Deploy Firestore Rules & Indexes
         working-directory: spending-priority
-        run: npx firebase-tools@latest deploy --only firestore --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive
+        run: npx firebase-tools@^15 deploy --only firestore --project spending-priority --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive
