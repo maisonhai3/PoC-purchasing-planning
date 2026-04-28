@@ -5,6 +5,24 @@ import {
   ResponsiveContainer
 } from "recharts";
 
+// NOTE: add x-api-key header with your Anthropic API key for local testing
+const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
+const MAX_TOKENS = 2048;
+
+const LOADING_INTERVAL_MS = 900;
+const LOADING_MESSAGES = [
+  "AI đang đọc danh sách...",
+  "Đang cân nhắc độ quan trọng...",
+  "Đang đánh giá mức độ khẩn cấp...",
+  "Đang xếp hạng ưu tiên...",
+];
+
+const QUADRANT_MIDPOINT = 5;
+const TOP_RANK_COUNT = 3;
+const SCORE_HIGH_THRESHOLD = 0.6;
+const SCORE_MID_THRESHOLD = 0.35;
+
 const SAMPLE = `iPhone 16 Pro Max
 Học phí khóa lập trình online
 Tiền thuê nhà tháng tới
@@ -16,14 +34,14 @@ Netflix subscription
 Sửa xe máy (hỏng phanh)
 Mua bộ bàn phím cơ`;
 
-function quadrantOf(imp, urg) {
-  if (imp >= 5 && urg >= 5) return "doFirst";
-  if (imp >= 5 && urg < 5) return "schedule";
-  if (imp < 5 && urg >= 5) return "delegate";
+function quadrantOf(importance, urgency) {
+  if (importance >= QUADRANT_MIDPOINT && urgency >= QUADRANT_MIDPOINT) return "doFirst";
+  if (importance >= QUADRANT_MIDPOINT && urgency < QUADRANT_MIDPOINT) return "schedule";
+  if (importance < QUADRANT_MIDPOINT && urgency >= QUADRANT_MIDPOINT) return "delegate";
   return "ignore";
 }
 
-const Q = {
+const QUADRANTS = {
   doFirst:  { label: "Làm ngay",       color: "#c0392b", bg: "#fdf0ef", border: "#e74c3c" },
   schedule: { label: "Lên kế hoạch",   color: "#9a6200", bg: "#fdf6e3", border: "#f0a500" },
   delegate: { label: "Cân nhắc",       color: "#1a5fa8", bg: "#eef4fc", border: "#3b82f6" },
@@ -31,11 +49,49 @@ const Q = {
 };
 
 const QUADRANT_AREAS = [
-  { q: "schedule", x1: 0, x2: 5, y1: 5, y2: 10, fill: "#fffbec" },
-  { q: "doFirst",  x1: 5, x2: 10, y1: 5, y2: 10, fill: "#fff0ef" },
-  { q: "ignore",   x1: 0, x2: 5, y1: 0, y2: 5,  fill: "#f8f8f6" },
-  { q: "delegate", x1: 5, x2: 10, y1: 0, y2: 5,  fill: "#eef5ff" },
+  { key: "schedule", x1: 0, x2: 5, y1: 5, y2: 10, fill: "#fffbec" },
+  { key: "doFirst",  x1: 5, x2: 10, y1: 5, y2: 10, fill: "#fff0ef" },
+  { key: "ignore",   x1: 0, x2: 5, y1: 0, y2: 5,  fill: "#f8f8f6" },
+  { key: "delegate", x1: 5, x2: 10, y1: 0, y2: 5,  fill: "#eef5ff" },
 ];
+
+function buildPrompt(lines) {
+  const itemList = lines.map((line, index) => `${index + 1}. ${line}`).join("\n");
+  return `Bạn là chuyên gia tài chính cá nhân. Phân tích các khoản chi tiêu dưới đây theo 2 tiêu chí:
+
+- importance (1-10): Mức độ quan trọng thực sự với cuộc sống, sức khỏe, sự nghiệp, an toàn tài chính
+- urgency (1-10): Mức độ cần chi ngay — 10 là không thể trì hoãn, 1 là có thể để lâu dài
+
+Danh sách:
+${itemList}
+
+Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm gì, chỉ JSON thuần. Mỗi object gồm:
+{ "name": string, "emoji": string (1 emoji phù hợp nhất), "importance": number, "urgency": number, "reason": string (1 câu ngắn tiếng Việt, giải thích tại sao điểm này) }`;
+}
+
+function parseResponseJson(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const lastComma = raw.lastIndexOf("},");
+    const trimmed = lastComma !== -1
+      ? raw.slice(0, lastComma + 1) + "]"
+      : raw.slice(0, raw.lastIndexOf("}") + 1) + "]";
+    return JSON.parse(trimmed);
+  }
+}
+
+function scoreItems(rawItems) {
+  return rawItems
+    .map(item => ({
+      ...item,
+      score: item.importance * item.urgency,
+      quadrant: quadrantOf(item.importance, item.urgency),
+      x: item.urgency,
+      y: item.importance,
+    }))
+    .sort((a, b) => b.score - a.score);
+}
 
 const CustomDot = ({ cx, cy, payload }) => (
   <text
@@ -51,42 +107,43 @@ const CustomDot = ({ cx, cy, payload }) => (
 
 const CustomTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
-  const d = payload[0].payload;
-  const q = Q[d.quadrant];
+  const item = payload[0].payload;
+  const quadrant = QUADRANTS[item.quadrant];
   return (
     <div style={{
-      background: "white", border: `1.5px solid ${q.border}`,
+      background: "white", border: `1.5px solid ${quadrant.border}`,
       borderRadius: 10, padding: "10px 14px", fontSize: 13,
       boxShadow: "0 8px 24px rgba(0,0,0,0.10)", maxWidth: 230,
     }}>
-      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{d.emoji} {d.name}</div>
-      <div style={{ color: "#777", marginBottom: 8, lineHeight: 1.5 }}>{d.reason}</div>
+      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{item.emoji} {item.name}</div>
+      <div style={{ color: "#777", marginBottom: 8, lineHeight: 1.5 }}>{item.reason}</div>
       <div style={{ display: "flex", gap: 10, marginBottom: 6, fontSize: 12 }}>
         <span style={{ background: "#f5f5f3", padding: "2px 8px", borderRadius: 6 }}>
-          Quan trọng: <b>{d.importance}</b>
+          Quan trọng: <b>{item.importance}</b>
         </span>
         <span style={{ background: "#f5f5f3", padding: "2px 8px", borderRadius: 6 }}>
-          Khẩn cấp: <b>{d.urgency}</b>
+          Khẩn cấp: <b>{item.urgency}</b>
         </span>
       </div>
       <div style={{
         display: "inline-block", padding: "3px 10px", borderRadius: 20,
-        background: q.bg, color: q.color, fontWeight: 600, fontSize: 12,
+        background: quadrant.bg, color: quadrant.color, fontWeight: 600, fontSize: 12,
       }}>
-        {q.label}
+        {quadrant.label}
       </div>
     </div>
   );
 };
 
 function ScoreBar({ score, max }) {
-  const pct = Math.round((score / max) * 100);
-  const q = score / max > 0.6 ? "doFirst" : score / max > 0.35 ? "schedule" : "ignore";
+  const ratio = score / max;
+  const percentage = Math.round(ratio * 100);
+  const quadrantKey = ratio > SCORE_HIGH_THRESHOLD ? "doFirst" : ratio > SCORE_MID_THRESHOLD ? "schedule" : "ignore";
   return (
     <div style={{ height: 4, borderRadius: 2, background: "#efefed", overflow: "hidden", marginTop: 8 }}>
       <div style={{
-        height: "100%", width: `${pct}%`,
-        background: Q[q].color, borderRadius: 2,
+        height: "100%", width: `${percentage}%`,
+        background: QUADRANTS[quadrantKey].color, borderRadius: 2,
         transition: "width 0.6s ease",
       }} />
     </div>
@@ -99,76 +156,39 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [error, setError] = useState(null);
   const [view, setView] = useState("queue");
-  const [loadingMsg, setLoadingMsg] = useState("AI đang đọc danh sách...");
+  const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
 
   async function analyze() {
-    const lines = inputText.split("\n").map(l => l.trim()).filter(Boolean);
+    const lines = inputText.split("\n").map(line => line.trim()).filter(Boolean);
     if (!lines.length) return;
     setStep("loading");
     setError(null);
 
-    const msgs = [
-      "AI đang đọc danh sách...",
-      "Đang cân nhắc độ quan trọng...",
-      "Đang đánh giá mức độ khẩn cấp...",
-      "Đang xếp hạng ưu tiên...",
-    ];
-    let mi = 0;
-    const iv = setInterval(() => {
-      mi = (mi + 1) % msgs.length;
-      setLoadingMsg(msgs[mi]);
-    }, 900);
+    let msgIndex = 0;
+    const intervalId = setInterval(() => {
+      msgIndex = (msgIndex + 1) % LOADING_MESSAGES.length;
+      setLoadingMsg(LOADING_MESSAGES[msgIndex]);
+    }, LOADING_INTERVAL_MS);
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch(ANTHROPIC_API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2048,
-          messages: [{
-            role: "user",
-            content: `Bạn là chuyên gia tài chính cá nhân. Phân tích các khoản chi tiêu dưới đây theo 2 tiêu chí:
-
-- importance (1-10): Mức độ quan trọng thực sự với cuộc sống, sức khỏe, sự nghiệp, an toàn tài chính
-- urgency (1-10): Mức độ cần chi ngay — 10 là không thể trì hoãn, 1 là có thể để lâu dài
-
-Danh sách:
-${lines.map((l, i) => `${i + 1}. ${l}`).join("\n")}
-
-Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm gì, chỉ JSON thuần. Mỗi object gồm:
-{ "name": string, "emoji": string (1 emoji phù hợp nhất), "importance": number, "urgency": number, "reason": string (1 câu ngắn tiếng Việt, giải thích tại sao điểm này) }`,
-          }],
+          model: ANTHROPIC_MODEL,
+          max_tokens: MAX_TOKENS,
+          messages: [{ role: "user", content: buildPrompt(lines) }],
         }),
       });
-      clearInterval(iv);
+      clearInterval(intervalId);
       const data = await res.json();
-      let raw = data.content[0].text.replace(/```json|```/g, "").trim();
-      let parsed;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        const lastComma = raw.lastIndexOf("},");
-        raw = lastComma !== -1
-          ? raw.slice(0, lastComma + 1) + "]"
-          : raw.slice(0, raw.lastIndexOf("}") + 1) + "]";
-        parsed = JSON.parse(raw);
-      }
-      const maxScore = 100;
-      const scored = parsed
-        .map(item => ({
-          ...item,
-          score: item.importance * item.urgency,
-          quadrant: quadrantOf(item.importance, item.urgency),
-          x: item.urgency,
-          y: item.importance,
-        }))
-        .sort((a, b) => b.score - a.score);
+      const raw = data.content[0].text.replace(/```json|```/g, "").trim();
+      const scored = scoreItems(parseResponseJson(raw));
       setItems(scored);
       setStep("results");
-    } catch (e) {
-      clearInterval(iv);
-      setError("Có lỗi: " + e.message);
+    } catch (err) {
+      clearInterval(intervalId);
+      setError(`Có lỗi: ${err.message}`);
       setStep("input");
     }
   }
@@ -211,7 +231,7 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
           position: "absolute", bottom: 12, right: 14,
           fontSize: 11, color: "#bbb",
         }}>
-          {inputText.split("\n").filter(l => l.trim()).length} mục
+          {inputText.split("\n").filter(line => line.trim()).length} mục
         </div>
       </div>
 
@@ -235,16 +255,14 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
       </button>
 
       <div style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "center" }}>
-        {["Làm ngay", "Lên kế hoạch", "Cân nhắc", "Bỏ qua"].map((l, i) => {
-          const qs = ["doFirst", "schedule", "delegate", "ignore"];
-          const q = Q[qs[i]];
-          return (
-            <span key={l} style={{
-              fontSize: 11, padding: "3px 9px", borderRadius: 20,
-              background: q.bg, color: q.color, fontWeight: 600,
-            }}>{l}</span>
-          );
-        })}
+        {Object.entries(QUADRANTS).map(([key, quadrant]) => (
+          <span key={key} style={{
+            fontSize: 11, padding: "3px 9px", borderRadius: 20,
+            background: quadrant.bg, color: quadrant.color, fontWeight: 600,
+          }}>
+            {quadrant.label}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -263,11 +281,11 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
       `}</style>
       <div className="loader">⚙️</div>
       <div className="msg" style={{ fontSize: 15, fontWeight: 600, color: "#333" }}>{loadingMsg}</div>
-      <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>Claude đang nghĩ...</div>
+      <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>AI đang nghĩ...</div>
     </div>
   );
 
-  const maxScore = Math.max(...items.map(i => i.score));
+  const maxScore = Math.max(...items.map(item => item.score));
 
   return (
     <div style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", maxWidth: 680, margin: "0 auto", padding: "1.5rem 1rem" }}>
@@ -287,17 +305,17 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          {[["queue", "Hàng đợi"], ["visual", "Tối giản"], ["matrix", "Ma trận"]].map(([v, label]) => (
+          {[["queue", "Hàng đợi"], ["visual", "Tối giản"], ["matrix", "Ma trận"]].map(([viewId, label]) => (
             <button
-              key={v}
+              key={viewId}
               className="view-btn"
-              onClick={() => setView(v)}
+              onClick={() => setView(viewId)}
               style={{
                 padding: "7px 14px", fontSize: 13, fontWeight: 600,
                 borderRadius: 8, cursor: "pointer",
-                border: view === v ? "none" : "1.5px solid #e0e0de",
-                background: view === v ? "#1a1a1a" : "white",
-                color: view === v ? "white" : "#555",
+                border: view === viewId ? "none" : "1.5px solid #e0e0de",
+                background: view === viewId ? "#1a1a1a" : "white",
+                color: view === viewId ? "white" : "#555",
               }}
             >
               {label}
@@ -308,13 +326,13 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
 
       {/* Quadrant legend pills */}
       <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-        {Object.entries(Q).map(([k, q]) => (
-          <span key={k} style={{
+        {Object.entries(QUADRANTS).map(([key, quadrant]) => (
+          <span key={key} style={{
             fontSize: 11, padding: "3px 10px", borderRadius: 20,
-            background: q.bg, color: q.color, fontWeight: 600,
-            border: `1px solid ${q.border}22`,
+            background: quadrant.bg, color: quadrant.color, fontWeight: 600,
+            border: `1px solid ${quadrant.border}22`,
           }}>
-            {q.label}
+            {quadrant.label}
           </span>
         ))}
       </div>
@@ -322,20 +340,20 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
       {/* Queue View */}
       {view === "queue" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-          {items.map((item, i) => {
-            const q = Q[item.quadrant];
-            const isTop = i === 0;
+          {items.map((item, index) => {
+            const quadrant = QUADRANTS[item.quadrant];
+            const isTop = index === 0;
             return (
               <div
-                key={i}
+                key={`${item.name}-${index}`}
                 className="item-card"
                 style={{
                   display: "flex", alignItems: "flex-start", gap: 12,
                   padding: "13px 16px",
-                  background: isTop ? q.bg : "white",
-                  border: `1.5px solid ${isTop ? q.border : "#e8e8e6"}`,
+                  background: isTop ? quadrant.bg : "white",
+                  border: `1.5px solid ${isTop ? quadrant.border : "#e8e8e6"}`,
                   borderRadius: 12,
-                  borderLeft: `4px solid ${q.color}`,
+                  borderLeft: `4px solid ${quadrant.color}`,
                   transition: "all 0.15s",
                   position: "relative",
                 }}
@@ -343,12 +361,12 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
                 {/* Rank */}
                 <div style={{
                   minWidth: 28, height: 28, borderRadius: "50%",
-                  background: i < 3 ? q.color : "#efefed",
-                  color: i < 3 ? "white" : "#aaa",
+                  background: index < TOP_RANK_COUNT ? quadrant.color : "#efefed",
+                  color: index < TOP_RANK_COUNT ? "white" : "#aaa",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 12, fontWeight: 800, flexShrink: 0, marginTop: 1,
                 }}>
-                  {i + 1}
+                  {index + 1}
                 </div>
 
                 {/* Emoji */}
@@ -364,10 +382,10 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
                     </span>
                     <span style={{
                       fontSize: 11, padding: "3px 9px", borderRadius: 20, flexShrink: 0,
-                      background: q.bg, color: q.color, fontWeight: 700,
-                      border: `1px solid ${q.border}33`,
+                      background: quadrant.bg, color: quadrant.color, fontWeight: 700,
+                      border: `1px solid ${quadrant.border}33`,
                     }}>
-                      {q.label}
+                      {quadrant.label}
                     </span>
                   </div>
                   <div style={{ fontSize: 12, color: "#888", marginTop: 3, lineHeight: 1.55 }}>
@@ -381,7 +399,7 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
                       Khẩn cấp: <b style={{ color: "#1a1a1a" }}>{item.urgency}/10</b>
                     </span>
                     <span style={{ color: "#777" }}>
-                      Điểm: <b style={{ color: q.color }}>{item.score}</b>
+                      Điểm: <b style={{ color: quadrant.color }}>{item.score}</b>
                     </span>
                   </div>
                   <ScoreBar score={item.score} max={maxScore} />
@@ -392,7 +410,6 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
         </div>
       )}
 
-
       {/* Visual (minimal) view */}
       {view === "visual" && (
         <div style={{
@@ -400,16 +417,16 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
           gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
           gap: 10,
         }}>
-          {items.map((item, i) => {
-            const q = Q[item.quadrant];
+          {items.map((item, index) => {
+            const quadrant = QUADRANTS[item.quadrant];
             return (
               <div
-                key={i}
+                key={`${item.name}-${index}`}
                 style={{
                   aspectRatio: "1",
                   borderRadius: 16,
-                  background: q.bg,
-                  border: `1.5px solid ${q.border}44`,
+                  background: quadrant.bg,
+                  border: `1.5px solid ${quadrant.border}44`,
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
@@ -422,9 +439,9 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
                 <div style={{ fontSize: 36 }}>{item.emoji}</div>
                 <div style={{
                   position: "absolute", top: 7, right: 9,
-                  fontSize: 10, fontWeight: 800, color: q.color, opacity: 0.7,
+                  fontSize: 10, fontWeight: 800, color: quadrant.color, opacity: 0.7,
                 }}>
-                  {i + 1}
+                  {index + 1}
                 </div>
               </div>
             );
@@ -443,21 +460,21 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
           </div>
           <ResponsiveContainer width="100%" height={360}>
             <ScatterChart margin={{ top: 10, right: 40, bottom: 40, left: 10 }}>
-              {QUADRANT_AREAS.map(({ q, x1, x2, y1, y2, fill }) => (
+              {QUADRANT_AREAS.map(({ key, x1, x2, y1, y2, fill }) => (
                 <ReferenceArea
-                  key={q} x1={x1} x2={x2} y1={y1} y2={y2}
+                  key={key} x1={x1} x2={x2} y1={y1} y2={y2}
                   fill={fill} fillOpacity={0.9}
                   label={{
-                    value: Q[q].label,
-                    position: x1 === 5
-                      ? (y1 === 5 ? "insideTopRight" : "insideBottomRight")
-                      : (y1 === 5 ? "insideTopLeft" : "insideBottomLeft"),
-                    style: { fontSize: 11, fontWeight: 700, fill: Q[q].color, opacity: 0.55 },
+                    value: QUADRANTS[key].label,
+                    position: x1 === QUADRANT_MIDPOINT
+                      ? (y1 === QUADRANT_MIDPOINT ? "insideTopRight" : "insideBottomRight")
+                      : (y1 === QUADRANT_MIDPOINT ? "insideTopLeft" : "insideBottomLeft"),
+                    style: { fontSize: 11, fontWeight: 700, fill: QUADRANTS[key].color, opacity: 0.55 },
                   }}
                 />
               ))}
-              <ReferenceLine x={5} stroke="#ddd" strokeDasharray="5 4" />
-              <ReferenceLine y={5} stroke="#ddd" strokeDasharray="5 4" />
+              <ReferenceLine x={QUADRANT_MIDPOINT} stroke="#ddd" strokeDasharray="5 4" />
+              <ReferenceLine y={QUADRANT_MIDPOINT} stroke="#ddd" strokeDasharray="5 4" />
               <XAxis
                 type="number" dataKey="x" domain={[0, 10]}
                 tick={{ fontSize: 11, fill: "#aaa" }} tickCount={6}
@@ -490,7 +507,6 @@ Trả về JSON array KHÔNG có markdown backtick, không giải thích thêm g
         >
           ← Phân tích lại
         </button>
-
       </div>
     </div>
   );
