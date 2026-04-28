@@ -1,15 +1,15 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
-const Anthropic = require("@anthropic-ai/sdk");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require("crypto");
 
 admin.initializeApp();
 const db = admin.firestore();
-const ANTHROPIC_KEY = defineSecret("ANTHROPIC_API_KEY");
+const GEMINI_KEY = defineSecret("GEMINI_API_KEY");
 
 exports.analyze = onRequest(
-  { secrets: [ANTHROPIC_KEY], region: "asia-southeast1", cors: true },
+  { secrets: [GEMINI_KEY], region: "asia-southeast1", cors: true },
   async (req, res) => {
     if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
@@ -63,46 +63,49 @@ exports.analyze = onRequest(
       return res.json({ items: cached.data().items });
     }
 
-    // Call Anthropic (Haiku + tool use for guaranteed valid JSON)
-    const client = new Anthropic({ apiKey: ANTHROPIC_KEY.value() });
-    const start = Date.now();
-    let items, errorMsg = null;
-
-    try {
-      const message = await client.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
-        tools: [{
+    // Call Gemini with function calling for guaranteed valid JSON
+    const genAI = new GoogleGenerativeAI(GEMINI_KEY.value());
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.0-flash",
+      tools: [{
+        functionDeclarations: [{
           name: "score_items",
-          input_schema: {
-            type: "object",
+          description: "Score spending items by importance and urgency for personal finance prioritisation",
+          parameters: {
+            type: "OBJECT",
             required: ["items"],
             properties: {
               items: {
-                type: "array",
+                type: "ARRAY",
                 items: {
-                  type: "object",
+                  type: "OBJECT",
                   required: ["name", "emoji", "importance", "urgency", "reason"],
                   properties: {
-                    name:       { type: "string" },
-                    emoji:      { type: "string" },
-                    importance: { type: "number", minimum: 1, maximum: 10 },
-                    urgency:    { type: "number", minimum: 1, maximum: 10 },
-                    reason:     { type: "string" },
+                    name:       { type: "STRING" },
+                    emoji:      { type: "STRING" },
+                    importance: { type: "NUMBER" },
+                    urgency:    { type: "NUMBER" },
+                    reason:     { type: "STRING" },
                   },
                 },
               },
             },
           },
         }],
-        tool_choice: { type: "tool", name: "score_items" },
-        messages: [{
-          role: "user",
-          content: `Bạn là chuyên gia tài chính cá nhân. Phân tích các khoản chi tiêu dưới đây theo độ quan trọng (importance 1-10) và độ khẩn cấp (urgency 1-10).\n\nDanh sách:\n${lines.map((l, i) => `${i + 1}. ${l}`).join("\n")}`,
-        }],
-      });
+      }],
+      toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["score_items"] } },
+    });
 
-      items = message.content[0].input.items;
+    const start = Date.now();
+    let items, errorMsg = null;
+
+    try {
+      const result = await model.generateContent(
+        `Bạn là chuyên gia tài chính cá nhân. Phân tích các khoản chi tiêu dưới đây theo độ quan trọng (importance 1-10) và độ khẩn cấp (urgency 1-10).\n\nDanh sách:\n${lines.map((l, i) => `${i + 1}. ${l}`).join("\n")}`
+      );
+
+      const call = result.response.candidates[0].content.parts[0].functionCall;
+      items = call.args.items;
 
       // Cache write — Firestore TTL policy on `createdAt` field handles expiry (24h)
       await cacheRef.set({ items, createdAt: admin.firestore.FieldValue.serverTimestamp() });
