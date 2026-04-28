@@ -281,7 +281,7 @@ export default function App() {
       `}</style>
       <div className="loader">⚙️</div>
       <div className="msg" style={{ fontSize: 15, fontWeight: 600, color: "#333" }}>{loadingMsg}</div>
-      <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>Claude đang nghĩ...</div>
+      <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>AI đang nghĩ...</div>
     </div>
   );
 
@@ -345,7 +345,7 @@ export default function App() {
             const isTop = index === 0;
             return (
               <div
-                key={item.name}
+                key={`${item.name}-${index}`}
                 className="item-card"
                 style={{
                   display: "flex", alignItems: "flex-start", gap: 12,
@@ -421,7 +421,7 @@ export default function App() {
             const quadrant = QUADRANTS[item.quadrant];
             return (
               <div
-                key={item.name}
+                key={`${item.name}-${index}`}
                 style={{
                   aspectRatio: "1",
                   borderRadius: 16,

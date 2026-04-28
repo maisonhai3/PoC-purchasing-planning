@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   ScatterChart, Scatter, XAxis, YAxis,
@@ -151,7 +151,7 @@ function LoadingView({ message }) {
       `}</style>
       <div className="loader">⚙️</div>
       <div className="msg" style={{ fontSize: 15, fontWeight: 600, color: "#333" }}>{message}</div>
-      <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>Claude đang nghĩ...</div>
+      <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>AI đang nghĩ...</div>
     </div>
   );
 }
@@ -169,17 +169,17 @@ export default function App() {
     return onAuthStateChanged(auth, setUser);
   }, []);
 
-  const handleSignOut = useCallback(() => signOut(auth), []);
+  function handleSignOut() { signOut(auth); }
 
-  const handleReset = useCallback(() => {
+  function handleReset() {
     setStep("input");
     setItems([]);
-  }, []);
+  }
 
-  const handleViewChange = useCallback((newView) => {
+  function handleViewChange(newView) {
     setView(newView);
     logEvent(analytics, "results_viewed", { view: newView });
-  }, []);
+  }
 
   async function analyze() {
     const lines = inputText.split("\n").map(line => line.trim()).filter(Boolean);
@@ -382,7 +382,7 @@ export default function App() {
             const isTop = index === 0;
             return (
               <div
-                key={item.name}
+                key={`${item.name}-${index}`}
                 className="item-card"
                 style={{
                   display: "flex", alignItems: "flex-start", gap: 12,
@@ -453,7 +453,7 @@ export default function App() {
             const quadrant = QUADRANTS[item.quadrant];
             return (
               <div
-                key={item.name}
+                key={`${item.name}-${index}`}
                 style={{
                   aspectRatio: "1",
                   borderRadius: 16,

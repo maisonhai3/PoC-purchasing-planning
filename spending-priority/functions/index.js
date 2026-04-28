@@ -62,22 +62,27 @@ exports.analyze = onRequest(
 async function checkRateLimit(uid) {
   const windowStart = Date.now() - RATE_LIMIT_WINDOW_MS;
   const limitRef = db.collection("rate_limits").doc(uid);
-  const limitDoc = await limitRef.get();
-  const limitData = limitDoc.exists
-    ? limitDoc.data()
-    : { count: 0, window_start: Date.now() };
+  let denied = false;
 
-  if (limitData.window_start > windowStart && limitData.count >= RATE_LIMIT_MAX_REQUESTS) {
-    return "Quá nhiều yêu cầu. Thử lại sau 1 giờ.";
-  }
+  await db.runTransaction(async (tx) => {
+    const limitDoc = await tx.get(limitRef);
+    const limitData = limitDoc.exists
+      ? limitDoc.data()
+      : { count: 0, window_start: Date.now() };
 
-  const newCount = limitData.window_start > windowStart ? limitData.count + 1 : 1;
-  await limitRef.set({
-    count: newCount,
-    window_start: limitData.window_start > windowStart ? limitData.window_start : Date.now(),
+    if (limitData.window_start > windowStart && limitData.count >= RATE_LIMIT_MAX_REQUESTS) {
+      denied = true;
+      return;
+    }
+
+    const newCount = limitData.window_start > windowStart ? limitData.count + 1 : 1;
+    tx.set(limitRef, {
+      count: newCount,
+      window_start: limitData.window_start > windowStart ? limitData.window_start : Date.now(),
+    });
   });
 
-  return null;
+  return denied ? "Quá nhiều yêu cầu. Thử lại sau 1 giờ." : null;
 }
 
 function sanitizeInput(rawLines) {
@@ -88,6 +93,7 @@ function sanitizeInput(rawLines) {
 }
 
 function computeCacheKey(lines) {
+  // Sort so ["A","B"] and ["B","A"] map to the same cache entry (order-independent)
   return crypto
     .createHash("sha256")
     .update(JSON.stringify([...lines].sort()))
