@@ -14,7 +14,15 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git branch *)",
-      "Bash(gh repo *)"
+      "Bash(gh repo *)",
+      "Bash(gh pr *)",
+      "Bash(firebase --version)",
+      "Bash(firebase projects:list)",
+      "Bash(npx firebase *)",
+      "Bash(node -e \"require\\('firebase-admin'\\)\")",
+      "mcp__claude_ai_Notion__notion-search",
+      "mcp__claude_ai_Notion__notion-fetch",
+      "mcp__claude_ai_Notion__notion-create-pages"
     ]
   }
 }
