@@ -2,7 +2,7 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const crypto = require("crypto");
+const { sanitizeInput, computeCacheKey, buildPrompt, buildScoringTool } = require("./utils");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -10,8 +10,6 @@ const GEMINI_KEY = defineSecret("GEMINI_API_KEY");
 
 const RATE_LIMIT_MAX_REQUESTS = 5;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-const MAX_ITEMS = 20;
-const MAX_ITEM_LENGTH = 200;
 
 exports.analyze = onRequest(
   { secrets: [GEMINI_KEY], region: "asia-southeast1", cors: true },
@@ -85,21 +83,6 @@ async function checkRateLimit(uid) {
   return denied ? "Quá nhiều yêu cầu. Thử lại sau 1 giờ." : null;
 }
 
-function sanitizeInput(rawLines) {
-  return (rawLines || [])
-    .slice(0, MAX_ITEMS)
-    .map(line => String(line).trim().slice(0, MAX_ITEM_LENGTH))
-    .filter(Boolean);
-}
-
-function computeCacheKey(lines) {
-  // Sort so ["A","B"] and ["B","A"] map to the same cache entry (order-independent)
-  return crypto
-    .createHash("sha256")
-    .update(JSON.stringify([...lines].sort()))
-    .digest("hex");
-}
-
 async function callGemini(lines) {
   const genAI = new GoogleGenerativeAI(GEMINI_KEY.value());
   const model = genAI.getGenerativeModel({
@@ -111,40 +94,6 @@ async function callGemini(lines) {
   const result = await model.generateContent(buildPrompt(lines));
   const call = result.response.candidates[0].content.parts[0].functionCall;
   return call.args.items;
-}
-
-function buildPrompt(lines) {
-  const itemList = lines.map((line, index) => `${index + 1}. ${line}`).join("\n");
-  return `Bạn là chuyên gia tài chính cá nhân. Phân tích các khoản chi tiêu dưới đây theo độ quan trọng (importance 1-10) và độ khẩn cấp (urgency 1-10).\n\nDanh sách:\n${itemList}`;
-}
-
-function buildScoringTool() {
-  return {
-    functionDeclarations: [{
-      name: "score_items",
-      description: "Score spending items by importance and urgency for personal finance prioritisation",
-      parameters: {
-        type: "OBJECT",
-        required: ["items"],
-        properties: {
-          items: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              required: ["name", "emoji", "importance", "urgency", "reason"],
-              properties: {
-                name:       { type: "STRING" },
-                emoji:      { type: "STRING" },
-                importance: { type: "NUMBER" },
-                urgency:    { type: "NUMBER" },
-                reason:     { type: "STRING" },
-              },
-            },
-          },
-        },
-      },
-    }],
-  };
 }
 
 async function writeAuditLog(db, uid, itemCount, durationMs, cacheHit, error) {

@@ -2,7 +2,8 @@
   "name": "spending-priority-functions",
   "description": "Firebase Functions for spending-priority app",
   "scripts": {
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "jest"
   },
   "engines": {
     "node": "20"
@@ -15,7 +16,11 @@
   },
   "devDependencies": {
     "eslint": "^8.15.0",
-    "eslint-config-google": "^0.14.0"
+    "eslint-config-google": "^0.14.0",
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node"
   },
   "private": true
 }
