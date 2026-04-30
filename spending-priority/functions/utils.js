@@ -52,4 +52,5 @@ function buildScoringTool() {
   };
 }
 
+// MAX_ITEMS and MAX_ITEM_LENGTH are exported for use in unit tests
 module.exports = { sanitizeInput, computeCacheKey, buildPrompt, buildScoringTool, MAX_ITEMS, MAX_ITEM_LENGTH };

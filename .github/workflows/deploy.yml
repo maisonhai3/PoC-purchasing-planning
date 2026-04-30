@@ -1,12 +1,16 @@
 name: Deploy to Firebase
 
+# Triggered only after the Test workflow completes successfully on main,
+# avoiding duplicate test runs while still gating every deploy.
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["Test"]
+    types: [completed]
+    branches: [main]
 
 jobs:
   detect-changes:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       functions: ${{ steps.filter.outputs.functions }}
@@ -15,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 2
       - uses: dorny/paths-filter@v4.0.1
         id: filter
@@ -32,44 +37,14 @@ jobs:
               - 'spending-priority/firestore.rules'
               - 'spending-priority/firestore.indexes.json'
 
-  test-frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-node@v6.4.0
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: spending-priority/package-lock.json
-      - name: Install dependencies
-        working-directory: spending-priority
-        run: npm ci
-      - name: Run frontend tests
-        working-directory: spending-priority
-        run: npm test
-
-  test-functions:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-node@v6.4.0
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: spending-priority/functions/package-lock.json
-      - name: Install functions dependencies
-        working-directory: spending-priority/functions
-        run: npm ci
-      - name: Run functions tests
-        working-directory: spending-priority/functions
-        run: npm test
-
   deploy-functions:
-    needs: [detect-changes, test-frontend, test-functions]
+    needs: detect-changes
     if: needs.detect-changes.outputs.functions == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-node@v6.4.0
         with:
           node-version: '20'
@@ -83,11 +58,13 @@ jobs:
         run: npx firebase-tools@^15 deploy --only functions --project spending-priority --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive
 
   deploy-hosting:
-    needs: [detect-changes, test-frontend, test-functions]
+    needs: detect-changes
     if: needs.detect-changes.outputs.hosting == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-node@v6.4.0
         with:
           node-version: '20'
@@ -112,11 +89,13 @@ jobs:
         run: npx firebase-tools@^15 deploy --only hosting --project spending-priority --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive
 
   deploy-firestore:
-    needs: [detect-changes, test-functions]
+    needs: detect-changes
     if: needs.detect-changes.outputs.firestore == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-node@v6.4.0
         with:
           node-version: '20'

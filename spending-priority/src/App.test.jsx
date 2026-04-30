@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onAuthStateChanged } from "firebase/auth";
 import App from "./App";
@@ -78,7 +78,7 @@ describe("App analyze flow", () => {
     signInAs(MOCK_USER);
   });
 
-  it("calls the analyze endpoint on submit", async () => {
+  it("calls the analyze endpoint with correct method and auth header", async () => {
     const user = userEvent.setup();
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -93,8 +93,37 @@ describe("App analyze flow", () => {
     await waitFor(() => expect(global.fetch).toHaveBeenCalledOnce());
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("analyze"),
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer mock-token",
+        }),
+      }),
     );
+  });
+
+  it("shows loading state while awaiting response", async () => {
+    let resolveFetch;
+    global.fetch = vi.fn().mockReturnValue(
+      new Promise(resolve => { resolveFetch = resolve; }),
+    );
+
+    render(<App />);
+    screen.getByRole("button", { name: /Phân tích ngay/ }).click();
+
+    await waitFor(() =>
+      expect(screen.getByText("AI đang đọc danh sách...")).toBeInTheDocument(),
+    );
+
+    // Resolve fetch so clearInterval is called and no state updates leak after unmount
+    await act(async () => {
+      resolveFetch({
+        ok: true,
+        json: () => Promise.resolve({
+          items: [{ name: "X", emoji: "📦", importance: 5, urgency: 5, reason: "" }],
+        }),
+      });
+    });
   });
 
   it("shows results view after successful analysis", async () => {
